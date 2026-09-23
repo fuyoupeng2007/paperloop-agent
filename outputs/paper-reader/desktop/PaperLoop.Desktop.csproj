@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>PaperLoop.Desktop</AssemblyName>
+    <RootNamespace>PaperLoop.Desktop</RootNamespace>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationIcon>assets/paperloop.ico</ApplicationIcon>
+    <Version>0.2.0</Version>
+    <Description>PaperLoop 本地论文阅读桌面窗口</Description>
+    <DefaultItemExcludes>$(DefaultItemExcludes);dist/**;staged/**;.packages/**;.build-home/**</DefaultItemExcludes>
+    <PublishDir>dist/</PublishDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
+  </ItemGroup>
+  <Target Name="ExcludeUnusedWpfAssembly" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -1,0 +1,35 @@
+import {chromium} from '../outputs/paper-reader/node_modules/@playwright/test/index.mjs';
+import {resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {dirname} from 'node:path';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const browser=await chromium.launch({headless:true,executablePath:'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'});
+const page=await browser.newPage({viewport:{width:1600,height:1000},deviceScaleFactor:1});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+try{
+  await page.route('**/api/**',route=>['GET','HEAD'].includes(route.request().method())?route.continue():route.fulfill({status:200,contentType:'application/json',body:'{"ok":true}'}));
+  await page.goto('http://127.0.0.1:8765',{waitUntil:'networkidle'});
+  await page.getByText('ChatGPT 已连接',{exact:true}).waitFor();
+  await page.locator('.paper-card').filter({hasText:'MonkeyOCR'}).click();
+  await page.getByLabel('当前页',{exact:true}).selectOption('1');
+  await page.getByTitle('切换目录',{exact:true}).click();
+  await page.locator('.page-loading').waitFor({state:'hidden',timeout:20000});
+  await page.getByRole('button',{name:'论文背景',exact:true}).click();
+  await page.getByText('SCIENCE CHINA Information Sciences · 2026',{exact:true}).waitFor();
+  if(await page.locator('.research-section').nth(1).locator('.research-entry').count()!==10)throw new Error('Ten uploaded-version authors missing');
+  const links=await page.locator('.research-sources a').evaluateAll(xs=>xs.map(x=>({href:x.href,rel:x.rel,target:x.target})));
+  if(links.length<4||links.some(x=>!x.href.startsWith('https://')||!x.rel.includes('noopener')))throw new Error('Research sources unavailable');
+  await page.screenshot({path:resolve(root,'outputs/PaperLoop-论文背景.png'),fullPage:true});
+  await page.locator('#block-p1-19f86e2700-5').getByRole('button',{name:'问这段',exact:true}).click();
+  await page.getByText('第三个部分为什么不能省略？请结合刚才这段继续说明。',{exact:true}).waitFor();
+  if(await page.locator('.chat-pair').count()!==2)throw new Error('Paragraph history leaked other scopes');
+  const before=await page.getByLabel('当前问答上下文').innerText();
+  await page.locator('.citations button').first().click();
+  await page.locator('.pdf-highlight').waitFor();
+  if(await page.getByLabel('当前问答上下文').innerText()!==before)throw new Error('Citation changed conversation');
+  await page.screenshot({path:resolve(root,'outputs/PaperLoop-段落追问.png'),fullPage:true});
+  await page.getByRole('button',{name:'关闭面板',exact:true}).click();
+  await page.screenshot({path:resolve(root,'outputs/PaperLoop-preview.png'),fullPage:true});
+  if(errors.length)throw new Error(errors.join('\n'));
+  console.log(JSON.stringify({realResearchAuthors:10,sourceLinks:links.length,realParagraphTurns:2,browserErrors:errors.length,writes:'all intercepted'}));
+}finally{await browser.close();}

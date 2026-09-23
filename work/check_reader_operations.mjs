@@ -1,0 +1,51 @@
+import {chromium} from '../outputs/paper-reader/node_modules/@playwright/test/index.mjs';
+import {existsSync} from 'node:fs';
+
+const edge='C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+const browser=await chromium.launch({headless:true,executablePath:existsSync(edge)?edge:undefined});
+const page=await browser.newPage({viewport:{width:1440,height:900},deviceScaleFactor:1});
+const errors=[];
+page.on('pageerror',error=>errors.push(error.message));
+await page.route('**/api/documents/*/reading',route=>route.fulfill({status:200,contentType:'application/json',body:'{"ok":true}'}));
+const base=process.env.PAPERLOOP_BASE_URL||'http://127.0.0.1:8766';
+try{
+  await page.goto(base,{waitUntil:'networkidle'});
+  await page.locator('.paper-card').filter({hasText:'MonkeyOCR'}).first().click();
+  await page.getByLabel('当前页').selectOption('1');
+  await page.locator('.pdf-object-badge').first().waitFor({timeout:15000});
+  const badge=page.locator('.pdf-object-badge').filter({hasText:'图 1'}).first();
+  await badge.click();
+  await page.locator('.conversation-context').getByText(/图 1/).first().waitFor();
+  await page.screenshot({path:'../../work/reader-figure-selected.png'});
+  await badge.dblclick();
+  await page.locator('.figure-viewer').waitFor();
+  if(!await page.locator('.assistant-panel').isVisible())throw new Error('Assistant panel hidden by figure viewer');
+  const zoom=page.locator('.figure-viewer-head .tools span');
+  const originalZoom=await zoom.textContent();
+  await page.locator('.figure-viewer-stage').hover();
+  await page.mouse.wheel(0,-380);
+  await page.waitForTimeout(250);
+  if(await zoom.textContent()===originalZoom)throw new Error('Figure wheel did not zoom');
+  await page.screenshot({path:'../../work/reader-figure-viewer.png'});
+  await page.locator('.figure-viewer button[title="关闭"]').click();
+  await page.locator('.figure-viewer').waitFor({state:'hidden'});
+  const picked=await page.evaluate(()=>{
+    const span=[...document.querySelectorAll('.paper-page-wrap[data-pdf-page="1"] .textLayer span')].find(el=>el.textContent?.includes('MonkeyOCR'));
+    if(!span||!span.firstChild)return false;
+    const range=document.createRange();
+    range.setStart(span.firstChild,0);
+    range.setEnd(span.firstChild,Math.min(9,span.firstChild.textContent?.length||0));
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+    span.closest('.page-sheet')?.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+    return true;
+  });
+  if(!picked)throw new Error('Could not find PDF title text layer');
+  await page.getByRole('toolbar',{name:'选中文字操作'}).waitFor({timeout:5000});
+  await page.getByRole('toolbar',{name:'选中文字操作'}).getByRole('button',{name:'提问'}).click();
+  await page.locator('.conversation-context').getByText(/选中文字/).waitFor();
+  await page.getByTitle('切换连续阅读').click();
+  if(await page.locator('.paper-page-wrap').count()!==14)throw new Error('Continuous pages not mounted');
+  if(errors.length)throw new Error('Browser errors: '+errors.join(' | '));
+  console.log('PASS: Figure 1 selection/viewer/wheel, live assistant, PDF text selection, continuous scroll');
+}finally{await browser.close();}

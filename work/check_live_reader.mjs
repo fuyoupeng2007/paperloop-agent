@@ -1,0 +1,32 @@
+import {chromium} from '../outputs/paper-reader/node_modules/@playwright/test/index.mjs';
+import {resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {dirname} from 'node:path';
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+const browser=await chromium.launch({headless:true,executablePath:'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'});
+const page=await browser.newPage({viewport:{width:1600,height:1000},deviceScaleFactor:1});
+const errors=[];page.on('pageerror',e=>errors.push(e.message));
+try{
+  await page.route('**/reading',route=>route.request().method()==='PUT'?route.fulfill({status:200,contentType:'application/json',body:'{"ok":true}'}):route.continue());
+  await page.goto('http://127.0.0.1:8765',{waitUntil:'networkidle'});
+  await page.getByText('ChatGPT 已连接',{exact:true}).waitFor();
+  await page.getByRole('button',{name:/查看连接/}).click();
+  await page.getByRole('dialog',{name:'ChatGPT 连接'}).waitFor();
+  if(await page.getByPlaceholder('https://你的服务地址/v1').isVisible())throw new Error('Advanced setup is exposed by default');
+  await page.getByRole('button',{name:'关闭设置'}).click();
+  await page.locator('.paper-card').filter({hasText:'MonkeyOCR'}).click();
+  await page.getByLabel('当前页',{exact:true}).selectOption('1');
+  await page.locator('.page-loading').waitFor({state:'hidden',timeout:20000});
+  await page.locator('.translation-block.title .translated-text').waitFor();
+  if(await page.locator('.translation-block.margin').count())throw new Error('Margin stamp is in reading text');
+  if(!(await page.locator('.reader-title h1').innerText()).includes('文档解析'))throw new Error('Chinese title missing');
+  await page.screenshot({path:resolve(root,'outputs/PaperLoop-preview.png'),fullPage:true});
+  await page.getByRole('button',{name:'提问',exact:true}).click();
+  await page.locator('.chat-answer strong').first().waitFor();
+  if((await page.locator('.chat-answer').first().innerText()).includes('[p1-'))throw new Error('Internal block id leaked into answer UI');
+  await page.locator('.citations button').first().click();
+  await page.locator('.pdf-highlight').waitFor();
+  await page.screenshot({path:resolve(root,'work/PaperLoop-answer.png'),fullPage:true});
+  if(errors.length)throw new Error(errors.join('\n'));
+  console.log('Live reader verified: ChatGPT connection, Chinese title, margin removal, real answers and citation highlight.');
+}finally{await browser.close();}

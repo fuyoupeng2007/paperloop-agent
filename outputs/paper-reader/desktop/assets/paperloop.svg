@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <title>PaperLoop — an open book within a reading loop</title>
+  <defs>
+    <linearGradient id="cover" x1="38" y1="18" x2="215" y2="246" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2D604D"/>
+      <stop offset="1" stop-color="#193F33"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="81" y1="78" x2="166" y2="177" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFDF1"/>
+      <stop offset="1" stop-color="#ECECD9"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="58" fill="url(#cover)"/>
+  <rect x="9" y="9" width="238" height="238" rx="57" stroke="#F5F2DF" stroke-opacity=".12" stroke-width="2"/>
+  <path d="M178 57 A85 85 0 1 0 211 142" stroke="#CEAB6F" stroke-width="8" stroke-linecap="round"/>
+  <path d="M201 149 L213 132 L222 150" stroke="#CEAB6F" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M64 80 C86 72 109 79 128 92 C147 79 170 72 192 80 L192 169 C170 162 148 167 128 182 C108 167 86 162 64 169 Z" fill="url(#paper)"/>
+  <path d="M128 94 V171" stroke="#2A5745" stroke-width="5" stroke-linecap="round"/>
+  <path d="M79 99 C92 97 105 101 115 107 M79 115 C92 113 105 117 115 123 M79 131 C91 129 103 133 112 138" stroke="#63816A" stroke-width="4" stroke-linecap="round"/>
+  <path d="M142 106 C152 100 165 97 178 99 M142 122 C152 116 165 113 178 115 M145 137 C155 131 166 129 178 131" stroke="#63816A" stroke-width="4" stroke-linecap="round"/>
+  <path d="M167 77 V109 L175 103 L183 105 V78 C178 77 172 77 167 77Z" fill="#D5B378"/>
+</svg>

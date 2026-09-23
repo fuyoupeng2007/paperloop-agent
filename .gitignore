@@ -1,0 +1,40 @@
+# Local runtime and user data are never committed.
+**/.venv/
+**/node_modules/
+**/data/
+**/dist/
+**/bin/
+**/obj/
+**/.packages/
+**/.build-home/
+**/staged/
+**/__pycache__/
+**/test-results/
+*.pyc
+*.log
+*.db
+*.pdf
+*.zip
+*.lnk
+*.pid
+*.png
+*.json.tmp-*
+
+# Keep the authored project, plans, and reusable verification scripts.
+/outputs/*
+!/outputs/paper-reader/
+!/outputs/*.md
+!/outputs/paperloop-interaction-design.html
+/outputs/MonkeyOCR-双语阅读稿.md
+/outputs/PaperLoop-阅读报告.md
+/work/*
+!/work/*.py
+!/work/*.mjs
+!/work/*.md
+/work/PaperLoop-AgentLoop-真实研究报告.md
+/work/monkeyocrv2-core-readonly.py
+
+# Generated reports and local run records remain on this computer.
+/work/*-result.json
+/work/*-run-id.txt
+/work/*-document.json
