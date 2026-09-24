@@ -1,13 +1,23 @@
 import json
 import os
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import secret_store
+
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path(os.environ.get('PAPERLOOP_DATA', str(ROOT / 'data'))).resolve()
 DEFAULT_SETTINGS = {'provider':'codex', 'base_url': '', 'api_key': '', 'model': '', 'vision_model': '', 'call_limit': 500, 'input_price': 0, 'output_price': 0}
+_SETTINGS_LOCK = threading.RLock()
+
+def default_settings():
+    result = DEFAULT_SETTINGS.copy()
+    if os.environ.get('PAPERLOOP_DISTRIBUTED') == '1':
+        result.update(provider='api', base_url='https://api.deepseek.com', model='deepseek-flash', vision_model='deepseek-flash')
+    return result
 
 @contextmanager
 def connect():
@@ -31,19 +41,29 @@ def init():
         db.execute('CREATE INDEX IF NOT EXISTS agent_runs_document ON agent_runs(doc_id)')
 
 def settings():
-    with connect() as db:
-        row = db.execute('SELECT body FROM settings WHERE id=1').fetchone()
-    return DEFAULT_SETTINGS | (json.loads(row[0]) if row else {})
+    with _SETTINGS_LOCK:
+        with connect() as db:
+            row = db.execute('SELECT body FROM settings WHERE id=1').fetchone()
+        current = json.loads(row[0]) if row else {}
+        if 'api_key' in current:
+            legacy = current.pop('api_key') or ''
+            if legacy:
+                secret_store.save(DATA, legacy)
+            with connect() as db:
+                db.execute('UPDATE settings SET body=? WHERE id=1', (json.dumps(current, ensure_ascii=False),))
+        return default_settings() | current | {'api_key': secret_store.load(DATA)}
 
 def save_settings(value):
-    with connect() as db:
-        db.execute('BEGIN IMMEDIATE')
-        row = db.execute('SELECT body FROM settings WHERE id=1').fetchone()
-        current = DEFAULT_SETTINGS | (json.loads(row[0]) if row else {})
-        if value.get('api_key') is None:
-            value.pop('api_key', None)
-        current.update(value)
-        db.execute('INSERT OR REPLACE INTO settings VALUES(1,?)', (json.dumps(current),))
+    with _SETTINGS_LOCK:
+        current = settings()
+        current.pop('api_key', None)
+        update = dict(value)
+        key = update.pop('api_key', None)
+        if key is not None:
+            secret_store.save(DATA, key)
+        current.update(update)
+        with connect() as db:
+            db.execute('INSERT OR REPLACE INTO settings VALUES(1,?)', (json.dumps(current, ensure_ascii=False),))
 
 def get(doc_id):
     with connect() as db:

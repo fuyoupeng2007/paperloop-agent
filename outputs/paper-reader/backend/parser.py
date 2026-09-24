@@ -50,7 +50,8 @@ def png_bytes(path, page_no, box=None):
     return buffer.getvalue()
 
 def normalized(box, width, height):
-    return [max(0, min(1, value / (width if i % 2 == 0 else height))) for i, value in enumerate(box)]
+    # OCR coordinates are NumPy scalars; persist ordinary floats in SQLite JSON.
+    return [float(max(0, min(1, value / (width if i % 2 == 0 else height)))) for i, value in enumerate(box)]
 
 def classify(text, size, median):
     if re.match(r'^(Figure|Fig\.|Table)\s*\d', text, re.I):

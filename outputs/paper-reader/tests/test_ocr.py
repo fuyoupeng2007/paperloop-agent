@@ -1,4 +1,5 @@
 import tempfile
+import json
 import os
 import unittest
 from pathlib import Path
@@ -22,6 +23,9 @@ class ScannedPDF(unittest.TestCase):
         content=' '.join(b['text'] for b in result['blocks'])
         self.assertIn('2026',content)
         self.assertTrue(all(len(b['bbox'])==4 for b in result['blocks']))
+        # Parsed pages are stored and returned as JSON, including OCR coordinates.
+        restored=json.loads(json.dumps(result))
+        self.assertEqual(restored['blocks'][0]['bbox'],result['blocks'][0]['bbox'])
 
 if __name__=='__main__':
     unittest.main()

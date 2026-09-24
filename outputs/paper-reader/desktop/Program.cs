@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
@@ -12,13 +13,36 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
         string? smokeFile = args.Length == 2 && args[0] == "--smoke-test" ? Path.GetFullPath(args[1]) : null;
-        Application.Run(new ReaderWindow(smokeFile));
+        bool distributed = File.Exists(Path.Combine(AppContext.BaseDirectory, "PaperLoop.distributed"));
+        using var appMutex = distributed ? new Mutex(true, "PaperLoop.Desktop.Installed", out _) : null;
+        if (distributed && !OwnsMutex(appMutex!))
+        {
+            const string detail = "PaperLoop 已经打开，请从任务栏切换到阅读窗口。升级或卸载前，请先退出 PaperLoop。";
+            if (smokeFile is not null)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(smokeFile)!);
+                File.WriteAllText(smokeFile, JsonSerializer.Serialize(new { ok = false, error = detail }));
+            }
+            else MessageBox.Show(detail, "PaperLoop", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        Application.Run(new ReaderWindow(smokeFile, distributed));
+    }
+
+    private static bool OwnsMutex(Mutex mutex)
+    {
+        try { return mutex.WaitOne(0); }
+        catch (AbandonedMutexException) { return true; }
     }
 }
 
 internal sealed class ReaderWindow : Form
 {
-    private const string AppAddress = "http://127.0.0.1:8765/";
+    private readonly bool distributed;
+    private string appAddress = "http://127.0.0.1:8765/";
+    private int appPort = 8765;
+    private string dataDirectory = "";
+    private static readonly string AppVersion = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "0.3.0";
     private readonly WebView2 browser = new() { Dock = DockStyle.Fill, Visible = false };
     private readonly Label message = new()
     {
@@ -32,9 +56,10 @@ internal sealed class ReaderWindow : Form
     private readonly string? smokeFile;
     private bool smokeWritten;
 
-    public ReaderWindow(string? smokeFile)
+    public ReaderWindow(string? smokeFile, bool distributed)
     {
         this.smokeFile = smokeFile;
+        this.distributed = distributed;
         Text = "PaperLoop · 论文阅读";
         BackColor = Color.FromArgb(247, 248, 244);
         MinimumSize = new Size(1000, 700);
@@ -49,12 +74,13 @@ internal sealed class ReaderWindow : Form
         {
             lifetime.Cancel();
             browser.Dispose();
-            // The backend intentionally outlives this window so translation continues.
+            // Development workers stay running; installed workers follow the parent PID.
         };
     }
 
-    private static string FindAppRoot()
+    private string FindAppRoot()
     {
+        if (distributed) return Path.GetFullPath(AppContext.BaseDirectory);
         for (DirectoryInfo? folder = new(AppContext.BaseDirectory); folder is not null; folder = folder.Parent)
         {
             if (File.Exists(Path.Combine(folder.FullName, "backend", "app.py")) &&
@@ -69,9 +95,20 @@ internal sealed class ReaderWindow : Form
         try
         {
             string root = FindAppRoot();
+            string? requestedPort = Environment.GetEnvironmentVariable("PAPERLOOP_PORT");
+            appPort = distributed ? 8766 : 8765;
+            if (!string.IsNullOrWhiteSpace(requestedPort) &&
+                (!int.TryParse(requestedPort, out appPort) || appPort < 1024 || appPort > 65535))
+                throw new InvalidOperationException("PAPERLOOP_PORT 必须是 1024 到 65535 之间的端口号。");
+            appAddress = $"http://127.0.0.1:{appPort}/";
+            string? requestedData = Environment.GetEnvironmentVariable("PAPERLOOP_DATA");
+            dataDirectory = Path.GetFullPath(!string.IsNullOrWhiteSpace(requestedData) ? requestedData : distributed
+                ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PaperLoop", "data")
+                : Path.Combine(root, "data"));
+            Directory.CreateDirectory(dataDirectory);
             await EnsureBackendAsync(root, lifetime.Token);
             message.Text = "正在打开阅读窗口…";
-            string cache = Path.Combine(root, "data", "webview2");
+            string cache = Path.Combine(dataDirectory, "webview2");
             Directory.CreateDirectory(cache);
             var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: cache);
             lifetime.Token.ThrowIfCancellationRequested();
@@ -118,7 +155,7 @@ internal sealed class ReaderWindow : Form
                     WriteSmokeFailure(e.WebErrorStatus.ToString());
                 }
             };
-            core.Navigate(AppAddress);
+            core.Navigate(appAddress);
         }
         catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
         catch (Exception ex)
@@ -132,12 +169,12 @@ internal sealed class ReaderWindow : Form
         }
     }
 
-    private static bool IsAppUri(string value)
+    private bool IsAppUri(string value)
     {
         if (value == "about:blank") return true;
         if (value.StartsWith("blob:", StringComparison.Ordinal)) value = value[5..];
         return Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == "http" &&
-               uri.Host == "127.0.0.1" && uri.Port == 8765 && string.IsNullOrEmpty(uri.UserInfo);
+               uri.Host == "127.0.0.1" && uri.Port == appPort && string.IsNullOrEmpty(uri.UserInfo);
     }
 
     private static void OpenExternal(string value)
@@ -177,17 +214,25 @@ internal sealed class ReaderWindow : Form
         });
     }
 
-    private static async Task<bool> HealthyAsync(CancellationToken cancellation)
+    private async Task<bool> HealthyAsync(CancellationToken cancellation)
     {
         try
         {
             using var client = new HttpClient(new HttpClientHandler { UseProxy = false })
             { Timeout = TimeSpan.FromSeconds(2) };
-            using var response = await client.GetAsync(AppAddress + "api/health", cancellation);
+            using var response = await client.GetAsync(appAddress + "api/health", cancellation);
             if (!response.IsSuccessStatusCode) return false;
             using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellation));
-            return json.RootElement.TryGetProperty("ok", out var ok) && ok.ValueKind == JsonValueKind.True &&
-                   json.RootElement.TryGetProperty("parser", out _) && json.RootElement.TryGetProperty("version", out _);
+            var health = json.RootElement;
+            if (!health.TryGetProperty("ok", out var ok) || ok.ValueKind != JsonValueKind.True ||
+                !health.TryGetProperty("parser", out _) || !health.TryGetProperty("version", out var version)) return false;
+            string expectedEdition = distributed ? "distributed" : "development";
+            string actualEdition = health.TryGetProperty("edition", out var edition) ? edition.GetString() ?? "development" : "development";
+            if (actualEdition != expectedEdition)
+                throw new InvalidOperationException($"端口 {appPort} 已被另一种 PaperLoop 版本占用。请退出该程序后重试。");
+            if (distributed && version.GetString() != AppVersion)
+                throw new InvalidOperationException($"旧版 PaperLoop 服务仍在端口 {appPort} 运行。请退出旧版程序，等待几秒后重新打开。当前版本：{AppVersion}。");
+            return true;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
         { return false; }
@@ -197,7 +242,7 @@ internal sealed class ReaderWindow : Form
     {
         if (await HealthyAsync(cancellation)) return;
         message.Text = "正在启动本机论文服务…";
-        string data = Path.Combine(root, "data");
+        string data = dataDirectory;
         Directory.CreateDirectory(data);
         FileStream? startLock = null;
         var deadline = DateTime.UtcNow.AddSeconds(60);
@@ -215,19 +260,28 @@ internal sealed class ReaderWindow : Form
         using (startLock)
         {
             if (await HealthyAsync(cancellation)) return;
-            string python = Path.Combine(root, ".venv", "Scripts", "pythonw.exe");
-            if (!File.Exists(python)) python = Path.Combine(root, ".venv", "Scripts", "python.exe");
-            if (!File.Exists(python))
-                throw new InvalidOperationException("当前目录缺少 Python 运行环境。请使用本机完整交付目录启动。");
-            var info = new ProcessStartInfo(python)
+            if (IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(address => address.Port == appPort))
+                throw new InvalidOperationException($"本机端口 {appPort} 正被其他程序使用。请关闭占用该端口的程序后重试。");
+            string executable = distributed ? Path.Combine(root, "backend", "PaperLoop.Backend.exe")
+                : Path.Combine(root, ".venv", "Scripts", "pythonw.exe");
+            if (!distributed && !File.Exists(executable)) executable = Path.Combine(root, ".venv", "Scripts", "python.exe");
+            if (!File.Exists(executable))
+                throw new InvalidOperationException(distributed
+                    ? "安装文件不完整，缺少本地论文服务。请重新运行 PaperLoop 安装包修复。"
+                    : "当前目录缺少 Python 运行环境。请使用本机完整交付目录启动。");
+            var info = new ProcessStartInfo(executable)
             {
                 WorkingDirectory = root,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
-            info.ArgumentList.Add(Path.Combine(root, "desktop", "launch_backend.py"));
+            if (!distributed) info.ArgumentList.Add(Path.Combine(root, "desktop", "launch_backend.py"));
             info.Environment["PAPERLOOP_DATA"] = data;
+            info.Environment["PAPERLOOP_PORT"] = appPort.ToString();
+            info.Environment["PAPERLOOP_DISTRIBUTED"] = distributed ? "1" : "0";
+            if (distributed) info.Environment["PAPERLOOP_PARENT_PID"] = Environment.ProcessId.ToString();
+            else info.Environment.Remove("PAPERLOOP_PARENT_PID");
             using var process = Process.Start(info) ?? throw new InvalidOperationException("无法启动本机服务。");
             deadline = DateTime.UtcNow.AddSeconds(60);
             while (DateTime.UtcNow < deadline)
@@ -235,10 +289,10 @@ internal sealed class ReaderWindow : Form
                 cancellation.ThrowIfCancellationRequested();
                 if (await HealthyAsync(cancellation)) return;
                 if (process.HasExited)
-                    throw new InvalidOperationException("本机服务启动失败。详情在 data/desktop-backend.log。");
+                    throw new InvalidOperationException($"本机服务启动失败。请查看日志：\n{Path.Combine(data, "desktop-backend.log")}");
                 await Task.Delay(400, cancellation);
             }
-            throw new InvalidOperationException("本机服务启动超时。稍后重新打开即可继续等待，详情在 data/desktop-backend.log。");
+            throw new InvalidOperationException($"本机服务启动超时。请关闭后重新打开，或查看日志：\n{Path.Combine(data, "desktop-backend.log")}");
         }
     }
 
@@ -274,6 +328,9 @@ internal sealed class ReaderWindow : Form
                 windowScreenshot,
                 iconScreenshot,
                 backendHealthy = await HealthyAsync(lifetime.Token),
+                edition = distributed ? "distributed" : "development",
+                version = AppVersion,
+                dataDirectory,
             }, new JsonSerializerOptions { WriteIndented = true }));
             Close();
         }

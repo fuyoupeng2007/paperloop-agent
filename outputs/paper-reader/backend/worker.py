@@ -155,7 +155,7 @@ def process(doc_id):
     check(doc_id)
     doc=store.get(doc_id)
     if not provider.configured(store.settings()):
-        set_state(doc_id,'awaiting_model','解析已保存。连接 ChatGPT 后即可自动翻译。')
+        set_state(doc_id,'awaiting_model','解析已保存。连接模型后即可自动翻译。')
         return
     if not doc['blocks']:
         set_state(doc_id,'review','未提取到可翻译内容，请检查页面提示。')

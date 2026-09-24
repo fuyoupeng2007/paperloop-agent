@@ -4,6 +4,7 @@ import hashlib
 import html
 import io
 import json
+import os
 import re
 import sqlite3
 import threading
@@ -93,7 +94,8 @@ def engine_check():
 
 @app.get('/api/health')
 def health():
-    return {'ok':True,'version':'0.1.0','parser':parser.PARSER_VERSION}
+    return {'ok':True,'version':'0.3.0','parser':parser.PARSER_VERSION,
+            'edition':'distributed' if os.environ.get('PAPERLOOP_DISTRIBUTED')=='1' else 'development'}
 
 @app.get('/api/settings')
 def get_settings():
@@ -111,16 +113,28 @@ class Settings(BaseModel):
 
 @app.put('/api/settings')
 def put_settings(value:Settings):
-    config=value.model_dump()
-    if config['provider'] not in ('codex','api'):
+    config=value.model_dump(exclude_unset=True)
+    if config.get('provider',store.settings()['provider']) not in ('codex','api'):
         raise HTTPException(400,'不支持的连接方式。')
     try:
-        if config['base_url']:
+        if config.get('base_url'):
             config['base_url']=provider.validate_url(config['base_url'].strip())
     except ValueError as exc:
         raise HTTPException(400,str(exc))
     store.save_settings(config)
     return public_settings()
+
+@app.post('/api/settings/check')
+def check_settings(value:Settings):
+    candidate=store.settings() | value.model_dump(exclude_unset=True)
+    if candidate.get('api_key') is None:
+        candidate['api_key']=store.settings()['api_key']
+    if candidate.get('provider')!='api':
+        raise HTTPException(400,'请选择 API 连接方式。')
+    try:
+        return provider.check_api_connection(candidate)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
 
 def brief(doc):
     return {k:v for k,v in doc.items() if k not in ('blocks','notes','chats','events','glossary','pages','fingerprint')} | {'translated':sum(b['status']=='done' for b in doc['blocks']),'total':len(doc['blocks'])}

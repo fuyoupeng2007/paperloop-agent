@@ -18,7 +18,8 @@ class ConfigurationError(ProviderError):
 def configured(config):
     if config.get('provider')=='codex':
         return codex_bridge.status()['logged_in']
-    return bool(config.get('base_url') and config.get('model'))
+    return bool(config.get('base_url') and config.get('model') and
+                (config.get('api_key') or urlparse(config['base_url']).hostname != 'api.deepseek.com'))
 
 def validate_url(url):
     parsed = urlparse(url)
@@ -27,6 +28,34 @@ def validate_url(url):
     if not parsed.hostname or (parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in ('localhost','127.0.0.1','::1'))):
         raise ValueError('请使用 HTTPS 服务地址；本机服务可使用 HTTP。')
     return url.rstrip('/')
+
+
+def check_api_connection(config):
+    """Small live request before saving a user's provider configuration."""
+    base = validate_url(config.get('base_url', '').strip())
+    if not config.get('model') or (urlparse(base).hostname == 'api.deepseek.com' and not config.get('api_key')):
+        raise ConfigurationError('请填写模型名称和自己的 DeepSeek API 密钥。')
+    headers = {'Content-Type': 'application/json'}
+    if config.get('api_key'):
+        headers['Authorization'] = 'Bearer ' + config['api_key']
+    try:
+        response = httpx.post(base + '/chat/completions',
+            json={'model': config['model'], 'messages': [{'role': 'user', 'content': '只回复：连接成功'}], 'max_tokens': 64},
+            headers=headers, timeout=httpx.Timeout(30, connect=10), follow_redirects=False, trust_env=False)
+        if response.status_code != 200:
+            hints = {400: '模型名称或请求格式不兼容', 401: 'API 密钥无效', 403: '账号无权调用此模型',
+                     404: '服务地址或模型名称不正确', 429: '服务限流或余额不足'}
+            raise ConfigurationError(f"连接测试失败（HTTP {response.status_code}）：{hints.get(response.status_code, '请检查服务状态')}。")
+        choice = response.json()['choices'][0]['message']['content']
+        if not isinstance(choice, str) or not choice.strip():
+            raise ProviderError('服务返回空内容，请检查模型是否支持 Chat Completions。')
+        return {'ok': True, 'message': '连接成功，可以开始导入论文。'}
+    except httpx.TimeoutException as exc:
+        raise ProviderError('连接测试超时，请检查网络后重试。') from exc
+    except httpx.RequestError as exc:
+        raise ProviderError('无法连接模型服务，请检查网络和服务地址。') from exc
+    except (KeyError, IndexError, ValueError, TypeError) as exc:
+        raise ProviderError('模型返回格式不兼容，服务需支持 Chat Completions。') from exc
 
 def complete(doc_id, messages, vision=False, max_tokens=3000):
     config = store.settings()

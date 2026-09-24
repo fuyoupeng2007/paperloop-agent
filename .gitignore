@@ -8,6 +8,8 @@
 **/.packages/
 **/.build-home/
 **/staged/
+**/build/
+**/release/
 **/__pycache__/
 **/test-results/
 *.pyc

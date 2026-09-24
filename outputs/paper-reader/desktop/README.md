@@ -1,5 +1,9 @@
 # PaperLoop Windows 桌面版
 
+供其他人安装的版本使用上层 [INSTALL.md](../INSTALL.md)。运行 `../Build-Installer.ps1` 会编译界面、冻结 Python 后端、发布 .NET 自包含桌面程序，再生成 Inno Setup 安装包；源电脑的 `data/`、密钥和论文不会加入包中。安装版默认监听 `127.0.0.1:8766`，用户数据保存在 `%LOCALAPPDATA%\PaperLoop\data`，关闭窗口会停止其后端。服务与模型连接在应用内完成，首次使用只需填写自己的 DeepSeek API 密钥。
+
+下面是本机源码开发入口；它使用 `8765` 和项目中的 `data/`。
+
 双击上一层的 `Start-PaperLoop-Desktop.cmd`，或双击 `dist/PaperLoop.Desktop.exe`。会打开独立桌面窗口，无须手动开启浏览器或命令窗口。
 
 - 应用根据可执行文件所在位置查找完整项目，从任何工作目录启动都可以。
