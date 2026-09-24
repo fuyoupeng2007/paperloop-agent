@@ -2,7 +2,7 @@
 
 ## Windows 安装版
 
-从 [公开下载页](https://github.com/fuyoupeng2007/paperloop-download/releases/latest) 安装 `PaperLoop-Setup-0.3.0-win-x64.exe` 后，从桌面打开应用，填入自己的 DeepSeek API 密钥并测试保存，即可导入 PDF。安装包包含 Python 后端、OCR 模型、前端与 .NET 桌面运行环境，不需要安装开发工具。完整说明见 [INSTALL.md](INSTALL.md)。
+从 [公开下载页](https://github.com/fuyoupeng2007/paperloop-agent/releases/latest) 安装 `PaperLoop-Setup-0.3.0-win-x64.exe` 后，从桌面打开应用，填入自己的 DeepSeek API 密钥并测试保存，即可导入 PDF。安装包包含 Python 后端、OCR 模型、前端与 .NET 桌面运行环境，不需要安装开发工具。完整说明见 [INSTALL.md](INSTALL.md)。
 
 安装版默认数据目录是 `%LOCALAPPDATA%\PaperLoop\data`，仅监听 `127.0.0.1:8766`。密钥使用 Windows DPAPI 加密保存，不会回显给界面。安装版关闭窗口时停止服务，重新打开后可以继续任务；源码开发版仍使用项目 `data/` 与 `8765`，关闭窗口后保持后台运行。
 
